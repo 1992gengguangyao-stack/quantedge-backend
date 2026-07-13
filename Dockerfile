@@ -2,10 +2,12 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy requirements and install Python dependencies one by one to save memory
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir fastapi==0.115.0 uvicorn[standard]==0.30.0 && \
@@ -18,8 +20,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir ccxt==4.5.64 && \
     pip install --no-cache-dir web3==7.1.0 eth-account==0.13.1
 
+# Copy application code
 COPY . .
 
+# Expose port
 EXPOSE 8000
 
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
