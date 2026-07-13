@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir web3==7.1.0 eth-account==0.13.1
 
 # Copy application code
+# Cache bust: v2-google-auth
 COPY . .
 
 # Expose port
