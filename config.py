@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     DEEPSEEK_API_URL: str = "https://api.deepseek.com/v1/chat/completions"
     DEEPSEEK_MODEL: str = "deepseek-v4-flash"
 
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
