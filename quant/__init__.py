@@ -1,0 +1,1 @@
+﻿"""QuantEdge quantitative trading engine."""
