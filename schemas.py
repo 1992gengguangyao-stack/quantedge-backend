@@ -30,6 +30,11 @@ class WalletLogin(BaseModel):
     invite_code: Optional[str] = None  # optional referral code for new wallet users
 
 
+class GoogleLogin(BaseModel):
+    credential: str  # Google ID token (JWT) from Google Identity Services
+    invite_code: Optional[str] = None  # optional referral code for new users
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
