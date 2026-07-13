@@ -1,5 +1,5 @@
 """
-QuantEdge API — Main FastAPI application entrypoint.
+QuantEdge API 鈥?Main FastAPI application entrypoint.
 
 Crypto Quantitative Trading Platform backend.
 """
@@ -35,7 +35,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# CORS — allow all origins for development
+# CORS 鈥?allow all origins for development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -65,13 +65,19 @@ app.include_router(ai.router, prefix="/api")
 @app.on_event("startup")
 def on_startup():
     """Create database tables on startup and launch background tasks."""
-    logger.info("Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-    logger.info("QuantEdge API started successfully.")
+    try:
+        logger.info("Creating database tables...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("QuantEdge API started successfully.")
+    except Exception as e:
+        logger.error(f"Database init error (non-fatal): {e}")
 
-    # Start auto-payment verifier background task
-    from quant.auto_verifier import start_auto_verifier
-    start_auto_verifier()
+    # Start auto-payment verifier background task (non-fatal if it fails)
+    try:
+        from quant.auto_verifier import start_auto_verifier
+        start_auto_verifier()
+    except Exception as e:
+        logger.error(f"Auto-verifier start error (non-fatal): {e}")
 
 
 # ---------------------------------------------------------------------------
