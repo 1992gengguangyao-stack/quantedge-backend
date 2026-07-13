@@ -1,5 +1,5 @@
 """
-QuantEdge API 鈥?Main FastAPI application entrypoint.
+QuantEdge API — Main FastAPI application entrypoint.
 
 Crypto Quantitative Trading Platform backend.
 """
@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine
-from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai
+from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai, admin
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -35,7 +35,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# CORS 鈥?allow all origins for development
+# CORS — allow all origins for development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,6 +57,7 @@ app.include_router(backtest.router, prefix="/api")
 app.include_router(market.router, prefix="/api")
 app.include_router(referrals.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 
 # ---------------------------------------------------------------------------
 # Startup
