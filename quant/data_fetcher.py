@@ -27,7 +27,7 @@ class DataFetcher:
     }
 
     # Exchanges that may be geo-blocked; try fallback order
-    FALLBACK_EXCHANGES = ["htx", "binance", "bybit", "okx"]
+    FALLBACK_EXCHANGES = ["hyperliquid", "htx", "binance", "bybit", "okx"]
 
     def __init__(self, exchange_id: str = "htx"):
         self.exchange_id = exchange_id
@@ -55,6 +55,74 @@ class DataFetcher:
         # Binance format: [openTime, open, high, low, close, volume, closeTime, ...]
         return [[d[0], float(d[1]), float(d[2]), float(d[3]), float(d[4]), float(d[5])] for d in data]
 
+    def _fetch_hyperliquid(self, symbol: str, timeframe: str, limit: int) -> list:
+        """Fetch OHLCV from Hyperliquid DEX public API (no geo-block, no auth)."""
+        import time
+        import requests
+
+        # Convert "BTC/USDT" -> "BTC"
+        coin = symbol.split("/")[0]
+
+        # Hyperliquid supports the same interval strings we use
+        # ("1m", "5m", "15m", "1h", "4h", "1d")
+        tf_seconds = self.TF_SECONDS.get(timeframe, 3600)
+
+        # startTime in unix milliseconds
+        current_time_ms = int(time.time() * 1000)
+        start_time = current_time_ms - (limit * tf_seconds * 1000)
+
+        url = "https://api.hyperliquid.xyz/info"
+        payload = {
+            "type": "candleSnapshot",
+            "req": {
+                "coin": coin,
+                "interval": timeframe,
+                "startTime": start_time,
+            },
+        }
+
+        r = requests.post(url, json=payload, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+
+        # Response: list of objects with "t" (unix ms), "o", "h", "l", "c", "v" (strings)
+        # Convert to: [timestamp_ms, open, high, low, close, volume]
+        ohlcv = []
+        for candle in data:
+            ohlcv.append([
+                int(candle["t"]),
+                float(candle["o"]),
+                float(candle["h"]),
+                float(candle["l"]),
+                float(candle["c"]),
+                float(candle["v"]),
+            ])
+        return ohlcv
+
+    def fetch_hyperliquid_ticker(self, symbol: str) -> dict:
+        """Fetch current mid price from Hyperliquid allMids endpoint."""
+        import time
+        import requests
+
+        coin = symbol.split("/")[0]
+        url = "https://api.hyperliquid.xyz/info"
+        payload = {"type": "allMids"}
+
+        r = requests.post(url, json=payload, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+
+        # Response: {"BTC": "62500.5", "ETH": "3200.75", ...}
+        price = data.get(coin)
+        if price is None:
+            raise ValueError(f"Coin '{coin}' not found in Hyperliquid mids")
+
+        return {
+            "symbol": symbol,
+            "last": float(price),
+            "timestamp": int(time.time() * 1000),
+        }
+
     def fetch_ohlcv(
         self,
         symbol: str = "BTC/USDT",
@@ -79,11 +147,18 @@ class DataFetcher:
         all_data = []
 
         # Strategy: try Binance Vision FIRST (fast, no geo-block),
-        # then fall back to ccxt exchanges if needed.
+        # then Hyperliquid DEX, then fall back to ccxt exchanges if needed.
         try:
             all_data = self._fetch_binance_vision(symbol, timeframe, limit)
         except Exception:
             pass
+
+        # Fallback: try Hyperliquid DEX (no geo-block, no auth)
+        if not all_data:
+            try:
+                all_data = self._fetch_hyperliquid(symbol, timeframe, limit)
+            except Exception:
+                pass
 
         # Fallback: try ccxt with the specified exchange
         if not all_data:
@@ -116,8 +191,12 @@ class DataFetcher:
                 if fallback_id == self.exchange_id:
                     continue
                 try:
-                    fallback_ex = getattr(ccxt, fallback_id)({"enableRateLimit": True})
-                    all_data = fallback_ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+                    if fallback_id == "hyperliquid":
+                        # Hyperliquid is a DEX, not a ccxt exchange
+                        all_data = self._fetch_hyperliquid(symbol, timeframe, limit)
+                    else:
+                        fallback_ex = getattr(ccxt, fallback_id)({"enableRateLimit": True})
+                        all_data = fallback_ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
                     if all_data:
                         break
                 except Exception:
