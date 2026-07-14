@@ -5,24 +5,12 @@ Pydantic v2 schemas for request/response validation.
 from datetime import datetime
 from typing import Any, Optional, Union
 
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
-
-class UserRegister(BaseModel):
-    email: EmailStr
-    username: str = Field(..., min_length=1, max_length=128)
-    password: str = Field(..., min_length=6, max_length=128)
-    invite_code: Optional[str] = None  # optional referral code
-
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
 
 class WalletLogin(BaseModel):
     message: str

@@ -3,7 +3,7 @@ FastAPI shared dependencies.
 """
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.orm import Session
 
@@ -12,14 +12,14 @@ from database import get_db
 from models import User
 
 # OAuth2 scheme — token is read from the Authorization: Bearer <token> header
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+bearer_scheme = HTTPBearer()
 
 # Alternative: allow raw Authorization header parsing (for convenience)
 # The OAuth2PasswordBearer already handles Bearer tokens, so we use it directly.
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
     """
@@ -34,7 +34,7 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = verify_token(token)
+        payload = verify_token(credentials.credentials)
         user_id: str | None = payload.get("sub")
         if user_id is None:
             raise credentials_exception
