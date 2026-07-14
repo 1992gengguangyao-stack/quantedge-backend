@@ -51,7 +51,8 @@ class SignedTestnetExchangeRequest(SignedExchangeRequest):
 
 
 def _trader(wallet_address: str) -> HyperliquidTrader:
-    return HyperliquidTrader(wallet_address=wallet_address, testnet=settings.HYPERLIQUID_TESTNET)
+    # The web trading UI is intentionally testnet-only until the signed flow is promoted.
+    return HyperliquidTrader(wallet_address=wallet_address, testnet=True)
 
 
 @router.get("/account/{wallet_address}")
@@ -85,7 +86,7 @@ def get_fills(wallet_address: str, current_user: User = Depends(get_current_user
 def get_all_prices():
     try:
         mids = _trader("0x0000000000000000000000000000000000000000").get_all_mids()
-        return {"source": "hyperliquid", "network": "testnet" if settings.HYPERLIQUID_TESTNET else "mainnet", "prices": mids}
+        return {"source": "hyperliquid", "network": "testnet", "prices": mids}
     except Exception as exc:
         logger.error("Hyperliquid prices request failed: %s", exc)
         raise HTTPException(status_code=502, detail="Failed to fetch prices") from exc
