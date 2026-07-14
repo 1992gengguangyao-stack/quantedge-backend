@@ -17,6 +17,7 @@ logger = logging.getLogger("quantedge.dex")
 router = APIRouter(prefix="/dex", tags=["dex"])
 
 ALLOWED_ACTION_TYPES = {"order", "cancel", "cancelByCloid"}
+TESTNET_ACTION_TYPES = ALLOWED_ACTION_TYPES | {"noop"}
 
 
 class Signature(BaseModel):
@@ -35,8 +36,17 @@ class SignedExchangeRequest(BaseModel):
     @field_validator("action")
     @classmethod
     def validate_action(cls, action: dict[str, Any]) -> dict[str, Any]:
-        if action.get("type") not in ALLOWED_ACTION_TYPES:
-            raise ValueError("Only order and cancel actions are supported")
+        if action.get("type") not in TESTNET_ACTION_TYPES:
+            raise ValueError("Unsupported exchange action")
+        return action
+
+
+class SignedTestnetExchangeRequest(SignedExchangeRequest):
+    @field_validator("action")
+    @classmethod
+    def validate_testnet_action(cls, action: dict[str, Any]) -> dict[str, Any]:
+        if action.get("type") not in TESTNET_ACTION_TYPES:
+            raise ValueError("Unsupported testnet action")
         return action
 
 
@@ -81,9 +91,7 @@ def get_all_prices():
         raise HTTPException(status_code=502, detail="Failed to fetch prices") from exc
 
 
-@router.post("/exchange")
-def relay_signed_exchange(req: SignedExchangeRequest, current_user: User = Depends(get_current_user)):
-    """Forward a browser-signed Hyperliquid action; no private key crosses the network."""
+def _relay(req: SignedExchangeRequest, base_url: str):
     now_ms = int(time.time() * 1000)
     if abs(req.nonce - now_ms) > 5 * 60 * 1000:
         raise HTTPException(status_code=400, detail="Signature nonce is outside the 5-minute window")
@@ -92,7 +100,6 @@ def relay_signed_exchange(req: SignedExchangeRequest, current_user: User = Depen
 
     payload = req.model_dump(exclude_none=True)
     payload["signature"] = req.signature.model_dump()
-    base_url = settings.HYPERLIQUID_TESTNET_URL if settings.HYPERLIQUID_TESTNET else settings.HYPERLIQUID_API_URL
     try:
         response = requests.post(f"{base_url}/exchange", json=payload, timeout=15)
     except requests.RequestException as exc:
@@ -105,6 +112,30 @@ def relay_signed_exchange(req: SignedExchangeRequest, current_user: User = Depen
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail=body)
     return body
+
+
+@router.post("/exchange")
+def relay_signed_exchange(req: SignedExchangeRequest, current_user: User = Depends(get_current_user)):
+    """Forward a browser-signed mainnet action; no private key crosses the network."""
+    if req.action.get("type") not in ALLOWED_ACTION_TYPES:
+        raise HTTPException(status_code=400, detail="Only order and cancel actions are supported on mainnet")
+    return _relay(req, settings.HYPERLIQUID_API_URL)
+
+
+@router.post("/exchange/testnet")
+def relay_signed_testnet_exchange(req: SignedTestnetExchangeRequest, current_user: User = Depends(get_current_user)):
+    """Forward a browser-signed testnet action, including harmless noop signature tests."""
+    return _relay(req, settings.HYPERLIQUID_TESTNET_URL)
+
+
+@router.get("/meta/testnet")
+def get_testnet_meta(current_user: User = Depends(get_current_user)):
+    try:
+        response = requests.post(f"{settings.HYPERLIQUID_TESTNET_URL}/info", json={"type": "meta"}, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Failed to fetch Hyperliquid testnet metadata") from exc
 
 
 @router.post("/order", status_code=status.HTTP_410_GONE)
