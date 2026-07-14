@@ -108,6 +108,81 @@ def _fetch_binance_ticker_24hr(symbol: str) -> dict:
     }
 
 
+def _fetch_hyperliquid_ticker(symbol: str) -> dict:
+    """Fetch ticker from Hyperliquid DEX public API (no geo-block, no auth).
+
+    Uses the ``allMids`` endpoint for a quick mid price and the
+    ``metaAndAssetCtxs`` endpoint for 24h volume / previous-day price.
+    """
+    import time
+    import requests
+
+    # Convert "BTC/USDT" -> "BTC"
+    coin = symbol.split("/")[0]
+    url = "https://api.hyperliquid.xyz/info"
+
+    # --- Step 1: metaAndAssetCtxs for 24h stats ---------------------------
+    mark_px = None
+    prev_day_px = None
+    day_ntl_vlm = None
+
+    try:
+        r = requests.post(
+            url, json={"type": "metaAndAssetCtxs"}, timeout=15
+        )
+        r.raise_for_status()
+        meta_data = r.json()
+        # meta_data is [metadata, assetCtxs]
+        if isinstance(meta_data, list) and len(meta_data) == 2:
+            metadata = meta_data[0]
+            asset_ctxs = meta_data[1]
+            universe = metadata.get("universe", [])
+            # Find the index of our coin in the universe
+            coin_idx = None
+            for idx, asset in enumerate(universe):
+                if asset.get("name") == coin:
+                    coin_idx = idx
+                    break
+            if coin_idx is not None and coin_idx < len(asset_ctxs):
+                ctx = asset_ctxs[coin_idx]
+                mark_px = ctx.get("markPx")
+                prev_day_px = ctx.get("prevDayPx")
+                day_ntl_vlm = ctx.get("dayNtlVlm")
+    except Exception:
+        pass
+
+    # --- Step 2: allMids fallback for price -------------------------------
+    if mark_px is None:
+        r = requests.post(url, json={"type": "allMids"}, timeout=15)
+        r.raise_for_status()
+        mids = r.json()
+        mark_px = mids.get(coin)
+
+    if mark_px is None:
+        raise ValueError(f"Coin '{coin}' not found on Hyperliquid")
+
+    last_price = float(mark_px)
+
+    # Calculate 24h change percentage from prevDayPx
+    change_pct = None
+    if prev_day_px is not None:
+        prev = float(prev_day_px)
+        if prev > 0:
+            change_pct = round((last_price - prev) / prev * 100, 2)
+
+    volume = float(day_ntl_vlm) if day_ntl_vlm is not None else None
+
+    return {
+        "symbol": symbol,
+        "last_price": last_price,
+        "change_pct": change_pct,
+        "high": None,
+        "low": None,
+        "volume": volume,
+        "timestamp": int(time.time()),
+    }
+
+
 # ---------------------------------------------------------------------------
 # 1. GET /api/market/ohlcv
 # ---------------------------------------------------------------------------
@@ -183,7 +258,13 @@ def get_ticker(
     except Exception as e:
         logger.warning("Binance Vision ticker failed for %s: %s", symbol, e)
 
-    # --- Attempt 2: DataFetcher.fetch_ticker (ccxt fallback) --------------
+    # --- Attempt 2: Hyperliquid DEX (no geo-block, no auth) --------------
+    try:
+        return _fetch_hyperliquid_ticker(symbol)
+    except Exception as e:
+        logger.warning("Hyperliquid ticker failed for %s: %s", symbol, e)
+
+    # --- Attempt 3: DataFetcher.fetch_ticker (ccxt fallback) --------------
     fetcher = DataFetcher()
     try:
         raw = fetcher.fetch_ticker(symbol)
