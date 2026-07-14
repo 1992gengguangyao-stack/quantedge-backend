@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine
-from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai, admin
+from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai, admin, dex as dex_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -58,6 +58,7 @@ app.include_router(market.router, prefix="/api")
 app.include_router(referrals.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(dex_router.router, prefix="/api")
 
 # ---------------------------------------------------------------------------
 # Startup
