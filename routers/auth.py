@@ -1,11 +1,10 @@
 """
-Auth router: register, login, wallet-login (SIWE), Google OAuth, and current user info.
+Auth router: register, login, wallet-login (SIWE), and current user info.
 """
 
 import secrets
 from datetime import datetime, timezone
 
-import requests
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -16,7 +15,6 @@ from auth import (
     verify_password,
     verify_siwe_message,
 )
-from config import settings
 from database import get_db
 from deps import get_current_user
 from models import User, Referral
@@ -26,7 +24,6 @@ from schemas import (
     UserOut,
     UserRegister,
     WalletLogin,
-    GoogleLogin,
     MessageResponse,
 )
 
@@ -172,104 +169,6 @@ def wallet_login(payload: WalletLogin, db: Session = Depends(get_db)):
         db.refresh(user)
 
         # Process referral reward for wallet users
-        if referrer:
-            referrer.referral_bonus_days = (referrer.referral_bonus_days or 0) + 7
-            referral = Referral(
-                referrer_id=referrer.id,
-                referred_id=user.id,
-                invite_code_used=payload.invite_code.upper().strip(),
-                reward_days_referrer=7,
-                reward_days_referred=3,
-                status="completed",
-            )
-            db.add(referral)
-            db.commit()
-
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive",
-        )
-
-    token = create_access_token(data={"sub": str(user.id)})
-    return Token(access_token=token, user=UserOut.model_validate(user))
-
-
-@router.post("/google", response_model=Token)
-def google_login(payload: GoogleLogin, db: Session = Depends(get_db)):
-    """
-    Sign in or register with a Google ID token (Google Identity Services).
-
-    The frontend obtains a Google ID token (JWT credential) via the Google
-    Sign-In button. This endpoint verifies the token with Google's tokeninfo
-    API, extracts the email, and finds-or-creates the user.
-    """
-    # Verify the Google ID token
-    try:
-        resp = requests.get(
-            "https://oauth2.googleapis.com/tokeninfo",
-            params={"id_token": payload.credential},
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid Google token",
-            )
-        token_info = resp.json()
-    except requests.RequestException:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to verify Google token",
-        )
-
-    # If GOOGLE_CLIENT_ID is set, verify audience
-    if settings.GOOGLE_CLIENT_ID:
-        if token_info.get("aud") != settings.GOOGLE_CLIENT_ID:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Google token audience mismatch",
-            )
-
-    email = token_info.get("email")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google token missing email",
-        )
-
-    # Find or create user by email
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        # Validate invite code if provided
-        referrer = None
-        if payload.invite_code:
-            referrer = db.query(User).filter(User.invite_code == payload.invite_code.upper().strip()).first()
-            if not referrer:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid invite code",
-                )
-
-        invite_code = _generate_invite_code(db)
-        # Use the part before @ as username, or "google_user" fallback
-        username = email.split("@")[0][:128] if email else "google_user"
-
-        user = User(
-            email=email,
-            username=username,
-            hashed_password=None,  # Google users don't have a password
-            plan="free",
-            is_active=True,
-            invite_code=invite_code,
-            referred_by_code=payload.invite_code.upper().strip() if payload.invite_code else None,
-            referral_bonus_days=3 if referrer else 0,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-        # Process referral reward
         if referrer:
             referrer.referral_bonus_days = (referrer.referral_bonus_days or 0) + 7
             referral = Referral(

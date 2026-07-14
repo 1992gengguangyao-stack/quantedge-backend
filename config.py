@@ -35,9 +35,6 @@ class Settings(BaseSettings):
     DEEPSEEK_API_URL: str = "https://api.deepseek.com/v1/chat/completions"
     DEEPSEEK_MODEL: str = "deepseek-v4-flash"
 
-    # Google OAuth
-    GOOGLE_CLIENT_ID: str = ""
-
     # Hyperliquid DEX
     HYPERLIQUID_API_URL: str = "https://api.hyperliquid.xyz"
     HYPERLIQUID_TESTNET_URL: str = "https://api.hyperliquid-testnet.xyz"
