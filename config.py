@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # Google OAuth
     GOOGLE_CLIENT_ID: str = ""
 
+    # Hyperliquid DEX
+    HYPERLIQUID_API_URL: str = "https://api.hyperliquid.xyz"
+    HYPERLIQUID_TESTNET_URL: str = "https://api.hyperliquid-testnet.xyz"
+    HYPERLIQUID_TESTNET: bool = False
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
