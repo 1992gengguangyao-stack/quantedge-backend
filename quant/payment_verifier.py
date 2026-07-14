@@ -3,6 +3,7 @@ On-chain payment verification using web3.py.
 Verifies cryptocurrency transactions on Ethereum and other EVM chains.
 """
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Union
@@ -370,10 +371,21 @@ class PaymentVerifier:
         expected_amount: float = None,
         recipient_address: str = None,
     ) -> dict:
-        """Verify a USDT TRC-20 payment on Tron using TronGrid API."""
+        """Verify a confirmed USDT TRC-20 Transfer event using TronGrid."""
         try:
+            tx_hash = tx_hash.strip().lower()
+            if len(tx_hash) != 64 or any(c not in "0123456789abcdef" for c in tx_hash):
+                return {"verified": False, "error": "Invalid Tron transaction hash"}
+            if not recipient_address:
+                return {"verified": False, "error": "TRC-20 receiving address is not configured"}
+
+            headers = {}
+            tron_api_key = getattr(settings, "TRON_PRO_API_KEY", "")
+            if tron_api_key:
+                headers["TRON-PRO-API-KEY"] = tron_api_key
+
             url = f"{TRONGRID_API}/v1/transactions/{tx_hash}"
-            resp = req_lib.get(url, timeout=15)
+            resp = req_lib.get(url, headers=headers, timeout=15)
             if resp.status_code != 200:
                 return {"verified": False, "error": f"TronGrid API error: {resp.status_code}"}
 
@@ -385,127 +397,72 @@ class PaymentVerifier:
             if not ret or ret[0].get("contractRet") != "SUCCESS":
                 return {"verified": False, "error": "Transaction not successful or pending"}
 
-            # Parse TRC-20 Transfer event from smart contract logs
-            # Look for the Transfer event in the transaction's logs
-            transfers = []
-            # Check contract data
-            for contract in tx_data.get("ret", []):
-                pass  # ret only has status
+            if not tx_data.get("blockNumber"):
+                return {"verified": False, "error": "Transaction is not confirmed yet"}
 
-            # Parse from the raw transaction data
-            # TRC-20 transfers are in the "log" field of the transaction
-            logs = []
-            # Try to get from events endpoint
             events_url = f"{TRONGRID_API}/v1/transactions/{tx_hash}/events"
-            try:
-                events_resp = req_lib.get(events_url, timeout=10)
-                if events_resp.status_code == 200:
-                    logs = events_resp.json().get("data", [])
-            except Exception:
-                pass
+            events_resp = req_lib.get(events_url, headers=headers, params={"only_confirmed": "true"}, timeout=10)
+            if events_resp.status_code != 200:
+                return {"verified": False, "error": f"TronGrid events API error: {events_resp.status_code}"}
 
-            # Also check the transaction info endpoint for contract logs
-            if not logs:
-                info_url = f"{TRONGRID_API}/v1/transactions/{tx_hash}/info"
+            for event in events_resp.json().get("data", []):
+                result = event.get("result") or {}
+                if event.get("event_name") != "Transfer":
+                    continue
+                if self._normalize_tron_address(event.get("contract_address")) != TRX_USDT_CONTRACT:
+                    continue
+                to_addr = self._normalize_tron_address(result.get("to"))
+                from_addr = self._normalize_tron_address(result.get("from"))
+                if to_addr != recipient_address:
+                    continue
+                amount_raw = result.get("value")
                 try:
-                    info_resp = req_lib.get(info_url, timeout=10)
-                    if info_resp.status_code == 200:
-                        info_data = info_resp.json().get("data", {})
-                        logs = info_data.get("log", [])
-                        # Also check receipt
-                        receipt = info_data.get("receipt", {})
-                        if receipt.get("result") != "SUCCESS":
-                            return {"verified": False, "error": "Transaction receipt shows failure"}
-                except Exception:
-                    pass
-
-            # Parse TRC-20 Transfer events
-            # Transfer event topic for TRC-20: ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
-            transfer_topic = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-
-            for log_entry in logs:
-                # TronGrid events format
-                if isinstance(log_entry, dict):
-                    # Check if it's a TRC-20 Transfer event
-                    topics = log_entry.get("topics", [])
-                    if not topics:
-                        # Try alternative format from events endpoint
-                        contract_addr = log_entry.get("contract_address", "")
-                        if contract_addr == TRX_USDT_CONTRACT or contract_addr == TRX_USDT_CONTRACT.lower():
-                            from_addr = log_entry.get("from", "")
-                            to_addr = log_entry.get("to", "")
-                            amount_raw = log_entry.get("value", 0)
-                            if isinstance(amount_raw, str):
-                                amount = int(amount_raw) / 1e6  # USDT has 6 decimals
-                            else:
-                                amount = amount_raw / 1e6
-
-                            if recipient_address and to_addr.lower() != recipient_address.lower():
-                                continue
-
-                            verified = True
-                            issues = []
-                            if expected_amount and abs(amount - expected_amount) > 0.01:
-                                verified = False
-                                issues.append(f"Amount mismatch: expected {expected_amount}, got {amount}")
-
-                            return {
-                                "verified": verified,
-                                "tx_hash": tx_hash,
-                                "chain": "Tron (TRC-20)",
-                                "token": "USDT",
-                                "sender": from_addr,
-                                "recipient": to_addr,
-                                "amount": amount,
-                                "currency": "USDT",
-                                "issues": issues if issues else None,
-                                "explorer_url": f"https://tronscan.org/#/transaction/{tx_hash}",
-                            }
-
-                    # EVM-style log format
-                    if topics and len(topics) >= 3 and topics[0].replace("0x", "") == transfer_topic:
-                        # Parse from topics
-                        from_hex = topics[1].replace("0x", "")
-                        to_hex = topics[2].replace("0x", "")
-                        from_addr = "0x" + from_hex[-40:]  # Last 20 bytes
-                        to_addr = "0x" + to_hex[-40:]
-
-                        # For Tron, addresses are base58 - try data field
-                        data_hex = log_entry.get("data", "0x0")
-                        if isinstance(data_hex, str) and data_hex.startswith("0x"):
-                            token_amount = int(data_hex, 16)
-                        else:
-                            token_amount = int(str(data_hex), 16) if data_hex else 0
-
-                        amount = token_amount / 1e6  # USDT 6 decimals
-
-                        if recipient_address and to_addr.lower() != recipient_address.lower():
-                            continue
-
-                        verified = True
-                        issues = []
-                        if expected_amount and abs(amount - expected_amount) > 0.01:
-                            verified = False
-                            issues.append(f"Amount mismatch: expected {expected_amount}, got {amount}")
-
-                        return {
-                            "verified": verified,
-                            "tx_hash": tx_hash,
-                            "chain": "Tron (TRC-20)",
-                            "token": "USDT",
-                            "sender": from_addr,
-                            "recipient": to_addr,
-                            "amount": amount,
-                            "currency": "USDT",
-                            "issues": issues if issues else None,
-                            "explorer_url": f"https://tronscan.org/#/transaction/{tx_hash}",
-                        }
+                    minor_units = int(amount_raw)
+                except (TypeError, ValueError):
+                    continue
+                expected_minor = round(float(expected_amount or 0) * 1_000_000)
+                if expected_amount is not None and minor_units != expected_minor:
+                    return {"verified": False, "error": "Amount mismatch", "issues": [f"Expected {expected_minor} minor units, got {minor_units}"]}
+                amount = minor_units / 1_000_000
+                return {
+                    "verified": True, "tx_hash": tx_hash, "chain": "Tron (TRC-20)",
+                    "token": "USDT", "sender": from_addr, "recipient": to_addr,
+                    "amount": amount, "currency": "USDT",
+                    "explorer_url": f"https://tronscan.org/#/transaction/{tx_hash}",
+                }
 
             return {"verified": False, "error": "No USDT TRC-20 transfer found in transaction"}
 
         except Exception as e:
             logger.error(f"TRC-20 payment verification failed: {e}")
             return {"verified": False, "error": str(e)}
+
+    @staticmethod
+    def _normalize_tron_address(address: str) -> str:
+        """Convert Tron hex addresses returned by event APIs to Base58Check."""
+        if not address:
+            return ""
+        value = address.strip()
+        raw_hex = value[2:] if value.lower().startswith("0x") else value
+        if len(raw_hex) == 64:  # indexed event topic
+            raw_hex = "41" + raw_hex[-40:]
+        elif len(raw_hex) == 40:
+            raw_hex = "41" + raw_hex
+        if len(raw_hex) != 42 or not raw_hex.lower().startswith("41"):
+            return value
+        try:
+            payload = bytes.fromhex(raw_hex)
+        except ValueError:
+            return value
+        checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+        number = int.from_bytes(payload + checksum, "big")
+        alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        encoded = ""
+        while number:
+            number, remainder = divmod(number, 58)
+            encoded = alphabet[remainder] + encoded
+        zeros = len(payload + checksum) - len((payload + checksum).lstrip(b"\0"))
+        return "1" * zeros + encoded
 
     def verify_payment(
         self,

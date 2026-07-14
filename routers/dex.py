@@ -1,253 +1,126 @@
-"""
-DEX router: Hyperliquid decentralized trading endpoints.
-All endpoints require JWT authentication.
-User provides their wallet address (read-only) or API wallet private key (trading).
-"""
+"""Hyperliquid read APIs and a private-key-free signed exchange relay."""
 
 import logging
-from typing import Optional
+import time
+from typing import Any, Literal, Optional
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from config import settings
 from deps import get_current_user
 from models import User
 from quant.hyperliquid_trader import HyperliquidTrader
 
 logger = logging.getLogger("quantedge.dex")
-
 router = APIRouter(prefix="/dex", tags=["dex"])
 
-
-# ---------------------------------------------------------------------------
-# Request schemas
-# ---------------------------------------------------------------------------
-
-class OrderRequest(BaseModel):
-    """Request body for placing / cancelling an order."""
-    wallet_address: str = Field(..., description="User's EVM wallet address (0x...)")
-    private_key: str = Field(..., description="API-wallet private key for signing")
-    coin: str = Field(..., description="Asset symbol, e.g. BTC")
-    is_buy: bool = Field(True, description="True for buy, False for sell")
-    size: float = Field(..., gt=0, description="Order size in base asset units")
-    limit_px: Optional[float] = Field(None, description="Limit price (for limit orders)")
-    order_type: str = Field("trigger", description="Order type: trigger (market) or limit")
-    reduce_only: bool = Field(False, description="If true, only reduce existing position")
+ALLOWED_ACTION_TYPES = {"order", "cancel", "cancelByCloid"}
 
 
-class CancelRequest(BaseModel):
-    """Request body for cancelling an order."""
-    wallet_address: str = Field(..., description="User's EVM wallet address (0x...)")
-    private_key: str = Field(..., description="API-wallet private key for signing")
-    oid: str = Field(..., description="Order ID to cancel")
+class Signature(BaseModel):
+    r: str = Field(pattern=r"^0x[0-9a-fA-F]{64}$")
+    s: str = Field(pattern=r"^0x[0-9a-fA-F]{64}$")
+    v: Literal[27, 28]
 
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
+class SignedExchangeRequest(BaseModel):
+    action: dict[str, Any]
+    nonce: int
+    signature: Signature
+    vaultAddress: Optional[str] = Field(None, pattern=r"^0x[0-9a-fA-F]{40}$")
+    expiresAfter: Optional[int] = None
 
-def _create_trader(wallet_address: str, private_key: str = None) -> HyperliquidTrader:
-    """Create a HyperliquidTrader instance."""
-    return HyperliquidTrader(
-        wallet_address=wallet_address,
-        private_key=private_key,
-        testnet=False,
-    )
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, action: dict[str, Any]) -> dict[str, Any]:
+        if action.get("type") not in ALLOWED_ACTION_TYPES:
+            raise ValueError("Only order and cancel actions are supported")
+        return action
 
 
-# ---------------------------------------------------------------------------
-# 1. GET /api/dex/account/{wallet_address}
-# ---------------------------------------------------------------------------
+def _trader(wallet_address: str) -> HyperliquidTrader:
+    return HyperliquidTrader(wallet_address=wallet_address, testnet=settings.HYPERLIQUID_TESTNET)
+
 
 @router.get("/account/{wallet_address}")
-def get_account_state(
-    wallet_address: str,
-    current_user: User = Depends(get_current_user),
-):
-    """Get account state for a Hyperliquid wallet: margin, positions, balance."""
+def get_account_state(wallet_address: str, current_user: User = Depends(get_current_user)):
     try:
-        trader = _create_trader(wallet_address)
-        state = trader.get_account_state()
-        return {
-            "wallet_address": wallet_address,
-            "account_state": state,
-        }
-    except Exception as e:
-        logger.error("Failed to get Hyperliquid account state for %s: %s", wallet_address, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch account state: {e}",
-        )
+        return {"wallet_address": wallet_address, "account_state": _trader(wallet_address).get_account_state()}
+    except Exception as exc:
+        logger.error("Hyperliquid account request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to fetch account state") from exc
 
-
-# ---------------------------------------------------------------------------
-# 2. GET /api/dex/orders/{wallet_address}
-# ---------------------------------------------------------------------------
 
 @router.get("/orders/{wallet_address}")
-def get_open_orders(
-    wallet_address: str,
-    current_user: User = Depends(get_current_user),
-):
-    """Get open orders for a Hyperliquid wallet."""
+def get_open_orders(wallet_address: str, current_user: User = Depends(get_current_user)):
     try:
-        trader = _create_trader(wallet_address)
-        orders = trader.get_open_orders()
-        return {
-            "wallet_address": wallet_address,
-            "orders": orders,
-        }
-    except Exception as e:
-        logger.error("Failed to get Hyperliquid open orders for %s: %s", wallet_address, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch open orders: {e}",
-        )
+        return {"wallet_address": wallet_address, "orders": _trader(wallet_address).get_open_orders()}
+    except Exception as exc:
+        logger.error("Hyperliquid orders request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to fetch open orders") from exc
 
-
-# ---------------------------------------------------------------------------
-# 3. GET /api/dex/fills/{wallet_address}
-# ---------------------------------------------------------------------------
 
 @router.get("/fills/{wallet_address}")
-def get_fills(
-    wallet_address: str,
-    current_user: User = Depends(get_current_user),
-):
-    """Get trade history (fills) for a Hyperliquid wallet."""
+def get_fills(wallet_address: str, current_user: User = Depends(get_current_user)):
     try:
-        trader = _create_trader(wallet_address)
-        fills = trader.get_user_fills()
-        return {
-            "wallet_address": wallet_address,
-            "fills": fills,
-        }
-    except Exception as e:
-        logger.error("Failed to get Hyperliquid fills for %s: %s", wallet_address, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch fills: {e}",
-        )
+        return {"wallet_address": wallet_address, "fills": _trader(wallet_address).get_user_fills()}
+    except Exception as exc:
+        logger.error("Hyperliquid fills request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to fetch fills") from exc
 
-
-# ---------------------------------------------------------------------------
-# 4. GET /api/dex/prices  (public -- no auth)
-# ---------------------------------------------------------------------------
 
 @router.get("/prices")
 def get_all_prices():
-    """Get all mid prices from Hyperliquid. Public endpoint (no auth)."""
     try:
-        trader = _create_trader("0x0000000000000000000000000000000000000000")
-        mids = trader.get_all_mids()
-        return {
-            "source": "hyperliquid",
-            "prices": mids,
-        }
-    except Exception as e:
-        logger.error("Failed to get Hyperliquid all mids: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch prices: {e}",
-        )
+        mids = _trader("0x0000000000000000000000000000000000000000").get_all_mids()
+        return {"source": "hyperliquid", "network": "testnet" if settings.HYPERLIQUID_TESTNET else "mainnet", "prices": mids}
+    except Exception as exc:
+        logger.error("Hyperliquid prices request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to fetch prices") from exc
 
 
-# ---------------------------------------------------------------------------
-# 5. POST /api/dex/order
-# ---------------------------------------------------------------------------
+@router.post("/exchange")
+def relay_signed_exchange(req: SignedExchangeRequest, current_user: User = Depends(get_current_user)):
+    """Forward a browser-signed Hyperliquid action; no private key crosses the network."""
+    now_ms = int(time.time() * 1000)
+    if abs(req.nonce - now_ms) > 5 * 60 * 1000:
+        raise HTTPException(status_code=400, detail="Signature nonce is outside the 5-minute window")
+    if req.expiresAfter is not None and req.expiresAfter <= now_ms:
+        raise HTTPException(status_code=400, detail="Signed action has expired")
 
-@router.post("/order")
-def place_order(
-    req: OrderRequest,
-    current_user: User = Depends(get_current_user),
-):
-    """Place an order on Hyperliquid. Requires private_key in the request body."""
+    payload = req.model_dump(exclude_none=True)
+    payload["signature"] = req.signature.model_dump()
+    base_url = settings.HYPERLIQUID_TESTNET_URL if settings.HYPERLIQUID_TESTNET else settings.HYPERLIQUID_API_URL
     try:
-        trader = _create_trader(req.wallet_address, private_key=req.private_key)
-        result = trader.place_order(
-            coin=req.coin,
-            is_buy=req.is_buy,
-            sz=req.size,
-            limit_px=req.limit_px,
-            order_type=req.order_type,
-            reduce_only=req.reduce_only,
-        )
-
-        if isinstance(result, dict) and result.get("error"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result,
-            )
-
-        return {
-            "wallet_address": req.wallet_address,
-            "order": result,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to place Hyperliquid order: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to place order: {e}",
-        )
-
-
-# ---------------------------------------------------------------------------
-# 6. DELETE /api/dex/order
-# ---------------------------------------------------------------------------
-
-@router.delete("/order")
-def cancel_order(
-    req: CancelRequest,
-    current_user: User = Depends(get_current_user),
-):
-    """Cancel an order on Hyperliquid. Requires private_key in the request body."""
+        response = requests.post(f"{base_url}/exchange", json=payload, timeout=15)
+    except requests.RequestException as exc:
+        logger.error("Hyperliquid exchange relay failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Hyperliquid is unavailable") from exc
     try:
-        trader = _create_trader(req.wallet_address, private_key=req.private_key)
-        result = trader.cancel_order(oid=req.oid)
-
-        if isinstance(result, dict) and result.get("error"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result,
-            )
-
-        return {
-            "wallet_address": req.wallet_address,
-            "oid": req.oid,
-            "result": result,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to cancel Hyperliquid order: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to cancel order: {e}",
-        )
+        body = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Invalid response from Hyperliquid") from exc
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=body)
+    return body
 
 
-# ---------------------------------------------------------------------------
-# 7. GET /api/dex/funding/{wallet_address}
-# ---------------------------------------------------------------------------
+@router.post("/order", status_code=status.HTTP_410_GONE)
+def retired_legacy_order(current_user: User = Depends(get_current_user)):
+    raise HTTPException(status_code=410, detail="Private-key order API retired; use /api/dex/exchange with a locally signed action")
+
+
+@router.delete("/order", status_code=status.HTTP_410_GONE)
+def retired_legacy_cancel(current_user: User = Depends(get_current_user)):
+    raise HTTPException(status_code=410, detail="Private-key cancel API retired; use /api/dex/exchange with a locally signed action")
+
 
 @router.get("/funding/{wallet_address}")
-def get_funding(
-    wallet_address: str,
-    current_user: User = Depends(get_current_user),
-):
-    """Get funding payment history for a Hyperliquid wallet."""
+def get_funding(wallet_address: str, current_user: User = Depends(get_current_user)):
     try:
-        trader = _create_trader(wallet_address)
-        funding = trader.get_user_funding()
-        return {
-            "wallet_address": wallet_address,
-            "funding": funding,
-        }
-    except Exception as e:
-        logger.error("Failed to get Hyperliquid funding for %s: %s", wallet_address, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch funding history: {e}",
-        )
+        return {"wallet_address": wallet_address, "funding": _trader(wallet_address).get_user_funding()}
+    except Exception as exc:
+        logger.error("Hyperliquid funding request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to fetch funding history") from exc

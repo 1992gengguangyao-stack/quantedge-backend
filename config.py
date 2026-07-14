@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     BTC_PAYMENT_ADDRESS: str = ""  # Your BTC address to receive payments
     # Tron receiving address (for USDT TRC-20)
     TRX_PAYMENT_ADDRESS: str = ""  # Your Tron address to receive USDT
+    TRON_PRO_API_KEY: str = ""  # Optional TronGrid rate-limit key
 
     # DeepSeek AI API (for natural language strategy generation)
     DEEPSEEK_API_KEY: str = ""

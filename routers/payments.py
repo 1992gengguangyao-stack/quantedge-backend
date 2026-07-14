@@ -46,17 +46,22 @@ def create_payment(
             detail="Failed to get price for the specified currency",
         )
 
+    if payload.currency.lower() == "usdt" and payload.chain_id not in ("trx", "trc20"):
+        raise HTTPException(status_code=400, detail="USDT payments only support TRC-20 (Tron)")
+
     # Determine receiving address based on currency and chain
     currency = payload.currency.lower()
     receiving_address = ""
 
     # TRC-20 USDT on Tron
-    if currency == "usdt" and payload.chain_id == "trx":
+    if currency == "usdt" and payload.chain_id in ("trx", "trc20"):
         receiving_address = settings.TRX_PAYMENT_ADDRESS
     elif currency in ("usdt", "usdc", "eth"):
         receiving_address = settings.PAYMENT_WALLET_ADDRESS
     elif currency == "btc":
         receiving_address = settings.BTC_PAYMENT_ADDRESS
+    if not receiving_address:
+        raise HTTPException(status_code=503, detail="Payment receiving address is not configured")
 
     payment = Payment(
         user_id=current_user.id,
@@ -90,6 +95,7 @@ def verify_payment(
     Uses web3.py to verify Ethereum/ERC-20 transactions and Blockstream API for Bitcoin.
     Checks transaction status, amount, and recipient address.
     """
+    payload.tx_hash = payload.tx_hash.strip().lower()
     # Find the user's most recent pending payment in the given currency
     payment = (
         db.query(Payment)
@@ -107,10 +113,16 @@ def verify_payment(
             detail="No pending payment found for this currency",
         )
 
+    if payload.currency.lower() == "usdt" and payload.chain_id not in ("trx", "trc20"):
+        raise HTTPException(status_code=400, detail="USDT payments only support TRC-20 (Tron)")
+    reused = db.query(Payment).filter(Payment.tx_hash == payload.tx_hash, Payment.id != payment.id).first()
+    if reused:
+        raise HTTPException(status_code=409, detail="Transaction hash has already been used")
+
     # Determine expected recipient address
     currency = payload.currency.lower()
     recipient_address = None
-    if currency == "usdt" and payload.chain_id == "trx":
+    if currency == "usdt" and payload.chain_id in ("trx", "trc20"):
         recipient_address = settings.TRX_PAYMENT_ADDRESS or None
     elif currency in ("usdt", "usdc", "eth"):
         recipient_address = settings.PAYMENT_WALLET_ADDRESS or None
