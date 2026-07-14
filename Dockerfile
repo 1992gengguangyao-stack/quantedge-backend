@@ -18,10 +18,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir numpy==1.26.4 && \
     pip install --no-cache-dir pandas==2.2.3 && \
     pip install --no-cache-dir ccxt==4.5.64 && \
-    pip install --no-cache-dir web3==7.1.0 eth-account==0.13.1
+    pip install --no-cache-dir web3==7.1.0 eth-account==0.13.1 && \
+    pip install --no-cache-dir hyperliquid-python-sdk==0.10.0
 
 # Copy application code
-# Cache bust: v2-google-auth
+# Cache bust: v3-hyperliquid-dex
 COPY . .
 
 # Expose port
