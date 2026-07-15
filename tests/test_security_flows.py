@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from quant.payment_verifier import PaymentVerifier, TRX_USDT_CONTRACT
 from routers.dex import SignedExchangeRequest, relay_signed_exchange
+from routers.analytics import _hash_identifier, _origin_allowed, _safe_properties
 
 
 RECIPIENT_HEX = "41" + "11" * 20
@@ -65,6 +66,30 @@ class SignedRelayTests(unittest.TestCase):
     def test_relay_rejects_stale_nonce(self):
         with self.assertRaises(HTTPException):
             relay_signed_exchange(self.request(1), current_user=Mock())
+
+
+class AnalyticsPrivacyTests(unittest.TestCase):
+    def test_identifiers_are_hashed_before_storage(self):
+        raw = "visitor-12345678"
+        digest = _hash_identifier(raw)
+        self.assertNotEqual(digest, raw)
+        self.assertEqual(len(digest), 64)
+        self.assertEqual(digest, _hash_identifier(raw))
+
+    def test_properties_are_bounded_and_scalar_only(self):
+        result = _safe_properties({
+            "plan": "starter",
+            "long": "x" * 300,
+            "nested": {"wallet": "must-not-be-stored"},
+        })
+        self.assertEqual(result["plan"], "starter")
+        self.assertEqual(len(result["long"]), 160)
+        self.assertNotIn("nested", result)
+
+    def test_only_owned_web_origins_are_allowed(self):
+        self.assertTrue(_origin_allowed("https://aiquantbtc.com"))
+        self.assertTrue(_origin_allowed("https://abc123.aiquantbtc.pages.dev"))
+        self.assertFalse(_origin_allowed("https://example.com"))
 
 
 if __name__ == "__main__":

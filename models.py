@@ -110,6 +110,30 @@ class Payment(Base):
     user = relationship("User", back_populates="payments")
 
 
+class AnalyticsEvent(Base):
+    """Privacy-first first-party product analytics event.
+
+    Anonymous browser identifiers are HMAC-hashed before storage.  We do not
+    store wallet addresses, IP addresses, or full referrer URLs here.
+    """
+
+    __tablename__ = "analytics_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(64), unique=True, index=True, nullable=False)
+    visitor_id_hash = Column(String(64), index=True, nullable=False)
+    session_id_hash = Column(String(64), index=True, nullable=False)
+    event_name = Column(String(64), index=True, nullable=False)
+    path = Column(String(512), default="/", nullable=False)
+    referrer_host = Column(String(255), default="", nullable=False)
+    source = Column(String(128), default="direct", nullable=False)
+    medium = Column(String(128), default="", nullable=False)
+    campaign = Column(String(128), default="", nullable=False)
+    plan = Column(String(32), default="", nullable=False)
+    properties = Column(JSON, default=dict, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, index=True, nullable=False)
+
+
 class Bot(Base):
     __tablename__ = "bots"
 

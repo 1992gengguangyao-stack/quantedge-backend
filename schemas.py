@@ -137,6 +137,24 @@ class PaymentOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Privacy-first product analytics
+# ---------------------------------------------------------------------------
+
+class AnalyticsEventCreate(BaseModel):
+    event_id: str = Field(..., min_length=8, max_length=64)
+    visitor_id: str = Field(..., min_length=8, max_length=128)
+    session_id: str = Field(..., min_length=8, max_length=128)
+    event_name: str = Field(..., min_length=2, max_length=64)
+    path: str = Field(default="/", max_length=512)
+    referrer_host: str = Field(default="", max_length=255)
+    source: str = Field(default="direct", max_length=128)
+    medium: str = Field(default="", max_length=128)
+    campaign: str = Field(default="", max_length=128)
+    plan: str = Field(default="", max_length=32)
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
 # Bot
 # ---------------------------------------------------------------------------
 

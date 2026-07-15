@@ -3,14 +3,16 @@ Admin dashboard router: view users, payments, strategies, bots, etc.
 Protected by a simple admin secret key.
 """
 
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 
 from database import get_db
-from models import User, Strategy, Subscription, Payment, Bot, Backtest, Referral
+from models import User, Strategy, Subscription, Payment, Bot, Backtest, Referral, AnalyticsEvent
 from config import settings
+from quant.payment_verifier import PLAN_PRICES
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -38,7 +40,7 @@ def admin_stats(db: Session = Depends(get_db), _=Depends(verify_admin)):
 
     # Revenue
     confirmed_payments = db.query(Payment).filter(Payment.status == "confirmed").all()
-    total_revenue = sum(p.amount for p in confirmed_payments)
+    total_revenue = sum(PLAN_PRICES.get(p.plan, 0) for p in confirmed_payments)
 
     # Active bots
     running_bots = db.query(Bot).filter(Bot.status == "running").count()
@@ -74,6 +76,69 @@ def admin_stats(db: Session = Depends(get_db), _=Depends(verify_admin)):
         "published_strategies": published_strategies,
         "plan_distribution": plan_dist,
         "payment_status_distribution": pay_dist,
+    }
+
+
+@router.get("/analytics")
+def admin_analytics(
+    day: date | None = Query(default=None),
+    tz_offset_minutes: int = Query(default=480, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    _=Depends(verify_admin),
+):
+    """Daily anonymous traffic, acquisition, funnel, and revenue summary."""
+    local_tz = timezone(timedelta(minutes=tz_offset_minutes))
+    local_day = day or datetime.now(local_tz).date()
+    start_local = datetime.combine(local_day, time.min, tzinfo=local_tz)
+    start_utc = start_local.astimezone(timezone.utc)
+    end_utc = (start_local + timedelta(days=1)).astimezone(timezone.utc)
+
+    events = (
+        db.query(AnalyticsEvent)
+        .filter(
+            AnalyticsEvent.created_at >= start_utc,
+            AnalyticsEvent.created_at < end_utc,
+        )
+        .all()
+    )
+
+    event_counts = Counter(event.event_name for event in events)
+    page_counts = Counter(event.path for event in events if event.event_name == "page_view")
+    source_counts = Counter(event.source or "direct" for event in events if event.event_name == "page_view")
+    visitors = len({event.visitor_id_hash for event in events})
+    sessions = len({event.session_id_hash for event in events})
+
+    payments = (
+        db.query(Payment)
+        .filter(
+            Payment.status == "confirmed",
+            Payment.created_at >= start_utc,
+            Payment.created_at < end_utc,
+        )
+        .all()
+    )
+    revenue_usd = round(sum(PLAN_PRICES.get(payment.plan, 0) for payment in payments), 2)
+
+    return {
+        "day": local_day.isoformat(),
+        "timezone_offset_minutes": tz_offset_minutes,
+        "visitors": visitors,
+        "sessions": sessions,
+        "page_views": event_counts.get("page_view", 0),
+        "events": dict(event_counts),
+        "top_pages": [{"path": path, "views": count} for path, count in page_counts.most_common(10)],
+        "top_sources": [{"source": source, "views": count} for source, count in source_counts.most_common(10)],
+        "funnel": {
+            "visitors": visitors,
+            "wallet_connect_open": event_counts.get("wallet_connect_open", 0),
+            "wallet_connect_success": event_counts.get("wallet_connect_success", 0),
+            "checkout_start": event_counts.get("checkout_start", 0),
+            "payment_submitted": event_counts.get("payment_submitted", 0),
+            "payment_confirmed": event_counts.get("payment_confirmed", 0),
+        },
+        "revenue_usd": revenue_usd,
+        "revenue_goal_usd": 1000,
+        "revenue_remaining_usd": max(0, round(1000 - revenue_usd, 2)),
     }
 
 
