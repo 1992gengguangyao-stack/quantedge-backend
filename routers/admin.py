@@ -98,6 +98,7 @@ def admin_analytics(
         .filter(
             AnalyticsEvent.created_at >= start_utc,
             AnalyticsEvent.created_at < end_utc,
+            AnalyticsEvent.source != "internal_qa",
         )
         .all()
     )
