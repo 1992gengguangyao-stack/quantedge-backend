@@ -37,6 +37,14 @@ def _allowed_siwe_domain(domain: str) -> bool:
     return bool(re.fullmatch(r"(?:localhost|127\.0\.0\.1)(?::\d+)?", domain or ""))
 
 
+def _siwe_uri_matches(domain: str, uri) -> bool:
+    """Require HTTPS for public origins while keeping local development usable."""
+    if uri.netloc != domain:
+        return False
+    local_domain = bool(re.fullmatch(r"(?:localhost|127\.0\.0\.1)(?::\d+)?", domain or ""))
+    return uri.scheme in ({"http", "https"} if local_domain else {"https"})
+
+
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
@@ -65,7 +73,7 @@ def wallet_login(payload: WalletLogin, db: Session = Depends(get_db)):
         uri = urlparse(fields.get("uri", ""))
         if not _allowed_siwe_domain(domain):
             raise ValueError("SIWE domain is not allowed")
-        if uri.netloc != domain or uri.scheme not in {"https", "http"}:
+        if not _siwe_uri_matches(domain, uri):
             raise ValueError("SIWE URI does not match its domain")
 
         nonce_record = (

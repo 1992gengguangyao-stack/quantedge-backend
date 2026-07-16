@@ -1,13 +1,16 @@
 import time
 import unittest
+from urllib.parse import urlparse
 from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 
 from quant.payment_verifier import PaymentVerifier, TRX_USDT_CONTRACT
-from quant.auto_verifier import _amounts_match
+from quant.auto_verifier import _amounts_match, _confirm_payment
+from routers.auth import _allowed_siwe_domain, _siwe_uri_matches
 from routers.dex import SignedExchangeRequest, relay_signed_exchange
 from routers.analytics import _hash_identifier, _origin_allowed, _safe_properties
+from routers.payments import _allocate_unique_amount
 
 
 RECIPIENT_HEX = "41" + "11" * 20
@@ -52,6 +55,39 @@ class PaymentVerifierTests(unittest.TestCase):
     def test_auto_match_requires_exact_bitcoin_satoshis(self):
         self.assertTrue(_amounts_match(0.00081234, 0.00081234, "btc"))
         self.assertFalse(_amounts_match(0.00081235, 0.00081234, "btc"))
+
+    def test_payment_quotes_allocate_distinct_exact_units(self):
+        db = Mock()
+        db.query.return_value.filter.return_value.all.return_value = [(29.000001,)]
+        self.assertEqual(_allocate_unique_amount(db, "usdt", 29.0), 29.000002)
+
+    def test_auto_confirm_rejects_reused_transaction_hash(self):
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = Mock()
+        payment = Mock(
+            id=7,
+            user_id=3,
+            amount=29.000001,
+            currency="usdt",
+            plan="starter",
+            status="pending",
+        )
+        self.assertFalse(_confirm_payment(db, payment, "reused-hash"))
+        self.assertEqual(payment.status, "pending")
+        db.commit.assert_not_called()
+
+
+class WalletOriginTests(unittest.TestCase):
+    def test_public_wallet_login_requires_https(self):
+        self.assertTrue(_allowed_siwe_domain("aiquantbtc.com"))
+        self.assertTrue(_siwe_uri_matches("aiquantbtc.com", urlparse("https://aiquantbtc.com")))
+        self.assertFalse(_siwe_uri_matches("aiquantbtc.com", urlparse("http://aiquantbtc.com")))
+
+    def test_preview_and_local_origins_are_scoped(self):
+        self.assertTrue(_allowed_siwe_domain("abc123.aiquantbtc.pages.dev"))
+        self.assertFalse(_allowed_siwe_domain("aiquantbtc.pages.dev.evil.example"))
+        self.assertTrue(_siwe_uri_matches("localhost:8000", urlparse("http://localhost:8000")))
+        self.assertFalse(_siwe_uri_matches("localhost:8000", urlparse("http://127.0.0.1:8000")))
 
 
 class SignedRelayTests(unittest.TestCase):
