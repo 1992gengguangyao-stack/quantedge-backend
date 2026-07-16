@@ -14,6 +14,7 @@ from web3 import Web3
 import sys
 sys.path.insert(0, ".")
 from config import settings
+from billing import PLAN_PRICES, get_plan_usd_price
 
 logger = logging.getLogger("quantedge.payment")
 
@@ -91,14 +92,6 @@ CHAIN_CONFIG = {
         "native_symbol": "ETH",
     },
 }
-
-# Pricing for plans (in USD)
-PLAN_PRICES = {
-    "starter": 29.0,
-    "pro": 79.0,
-    "expert": 199.0,
-}
-
 
 class PaymentVerifier:
     """Verify cryptocurrency payments on-chain."""
@@ -501,9 +494,14 @@ class PaymentVerifier:
 
         return {"verified": False, "error": f"Unsupported currency: {currency}"}
 
-    def get_plan_price(self, plan: str, currency: str = "usdt") -> float:
+    def get_plan_price(
+        self,
+        plan: str,
+        currency: str = "usdt",
+        billing_period: str = "monthly",
+    ) -> float:
         """Get the price of a plan in the specified currency."""
-        usd_price = PLAN_PRICES.get(plan.lower(), 0)
+        usd_price = get_plan_usd_price(plan, billing_period)
         if not usd_price:
             return 0
 

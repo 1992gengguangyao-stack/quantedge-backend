@@ -12,7 +12,7 @@ from sqlalchemy import func, desc
 from database import get_db
 from models import User, Strategy, Subscription, Payment, Bot, Backtest, Referral, AnalyticsEvent
 from config import settings
-from quant.payment_verifier import PLAN_PRICES
+from billing import get_plan_usd_price
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -40,7 +40,7 @@ def admin_stats(db: Session = Depends(get_db), _=Depends(verify_admin)):
 
     # Revenue
     confirmed_payments = db.query(Payment).filter(Payment.status == "confirmed").all()
-    total_revenue = sum(PLAN_PRICES.get(p.plan, 0) for p in confirmed_payments)
+    total_revenue = sum(get_plan_usd_price(p.plan, p.billing_period) for p in confirmed_payments)
 
     # Active bots
     running_bots = db.query(Bot).filter(Bot.status == "running").count()
@@ -118,7 +118,10 @@ def admin_analytics(
         )
         .all()
     )
-    revenue_usd = round(sum(PLAN_PRICES.get(payment.plan, 0) for payment in payments), 2)
+    revenue_usd = round(
+        sum(get_plan_usd_price(payment.plan, payment.billing_period) for payment in payments),
+        2,
+    )
 
     return {
         "day": local_day.isoformat(),

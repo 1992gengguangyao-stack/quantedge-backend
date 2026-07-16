@@ -34,6 +34,7 @@ class User(Base):
     username = Column(String(128), nullable=False)
     hashed_password = Column(String(255), nullable=True)
     plan = Column(String(32), default="free", nullable=False)  # free/starter/pro/expert
+    plan_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
 
@@ -115,6 +116,7 @@ class Payment(Base):
     tx_hash = Column(String(128), nullable=True, index=True)
     status = Column(String(32), default="pending")  # pending/confirmed/failed
     plan = Column(String(32), default="free")
+    billing_period = Column(String(16), default="monthly", nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     # Relationships

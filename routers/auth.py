@@ -16,6 +16,7 @@ from auth import (
     parse_siwe_message,
     verify_siwe_message,
 )
+from billing import expire_user_plan_if_needed
 from database import get_db
 from deps import get_current_user
 from models import User, Referral, SiweNonce
@@ -146,6 +147,10 @@ def wallet_login(payload: WalletLogin, db: Session = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
+
+    if expire_user_plan_if_needed(user):
+        db.commit()
+        db.refresh(user)
 
     token = create_access_token(data={"sub": str(user.id)})
     return Token(access_token=token, user=UserOut.model_validate(user))

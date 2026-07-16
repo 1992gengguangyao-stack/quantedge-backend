@@ -24,7 +24,8 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import SessionLocal
 from models import Payment, User
-from quant.payment_verifier import PaymentVerifier, CHAIN_CONFIG, PLAN_PRICES
+from billing import activate_user_plan
+from quant.payment_verifier import PaymentVerifier, CHAIN_CONFIG
 
 logger = logging.getLogger("auto_verifier")
 
@@ -343,7 +344,7 @@ def _confirm_payment(db: Session, payment: Payment, tx_hash: str) -> bool:
     # Upgrade user plan
     user = db.query(User).filter(User.id == payment.user_id).first()
     if user:
-        user.plan = payment.plan
+        activate_user_plan(user, payment.plan, payment.billing_period)
         logger.info(
             "Payment #%d auto-confirmed: %s %s -> user %d upgraded to %s (tx: %s)",
             payment.id,

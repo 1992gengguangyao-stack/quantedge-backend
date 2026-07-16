@@ -100,6 +100,11 @@ def start_bot(
     api_key = bot.config.get("api_key", "")
     api_secret = bot.config.get("api_secret", "")
     testnet = bot.config.get("testnet", True)
+    if not api_key or not api_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Exchange API credentials are required before a bot can start",
+        )
 
     # Execute the bot based on type
     execution_result = None
@@ -147,9 +152,11 @@ def start_bot(
             # Custom bot: just test connection
             execution_result = trader.test_connection()
 
-    except Exception as e:
-        # If exchange connection fails, still mark as running but record error
-        execution_result = {"error": str(e), "status": "connection_failed"}
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The exchange rejected the bot startup request",
+        )
 
     # Update bot status
     bot.status = "running"

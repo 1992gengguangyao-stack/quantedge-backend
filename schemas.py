@@ -32,6 +32,7 @@ class UserOut(BaseModel):
     wallet_address: Optional[str] = None
     username: str
     plan: str
+    plan_expires_at: Optional[datetime] = None
     is_active: bool
     created_at: datetime
     invite_code: Optional[str] = None
@@ -114,6 +115,7 @@ class PaymentCreate(BaseModel):
     plan: str  # free/starter/pro/expert
     currency: str  # usdt/usdc/btc/eth/fiat
     chain_id: Optional[Union[int, str]] = None  # int=EVM chain, "trx"=Tron
+    billing_period: str = "monthly"  # monthly/annual
 
 
 class PaymentVerify(BaseModel):
@@ -121,6 +123,7 @@ class PaymentVerify(BaseModel):
     currency: str
     amount: Optional[float] = None
     chain_id: Optional[Union[int, str]] = None  # 1=Ethereum, 56=BSC, 137=Polygon, 42161=Arbitrum, "trx"=Tron
+    payment_id: Optional[int] = None
 
 
 class PaymentOut(BaseModel):
@@ -133,6 +136,7 @@ class PaymentOut(BaseModel):
     tx_hash: Optional[str] = None
     status: str
     plan: str
+    billing_period: str = "monthly"
     created_at: datetime
 
 

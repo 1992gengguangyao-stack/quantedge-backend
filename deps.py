@@ -8,6 +8,7 @@ from jose import JWTError
 from sqlalchemy.orm import Session
 
 from auth import verify_token
+from billing import expire_user_plan_if_needed
 from database import get_db
 from models import User
 
@@ -49,4 +50,7 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
+    if expire_user_plan_if_needed(user):
+        db.commit()
+        db.refresh(user)
     return user

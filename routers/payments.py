@@ -14,7 +14,8 @@ from database import get_db
 from deps import get_current_user
 from models import Payment, User
 from schemas import MessageResponse, PaymentCreate, PaymentOut, PaymentVerify
-from quant.payment_verifier import PaymentVerifier, PLAN_PRICES, CHAIN_CONFIG
+from billing import activate_user_plan, PLAN_PRICES, get_plan_usd_price
+from quant.payment_verifier import PaymentVerifier, CHAIN_CONFIG
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 def _payment_response(payment: Payment, receiving_address: str) -> dict:
     result = PaymentOut.model_validate(payment).model_dump(mode="json")
     result["receiving_address"] = receiving_address
-    result["usd_price"] = PLAN_PRICES.get(payment.plan, 0)
+    result["usd_price"] = get_plan_usd_price(payment.plan, payment.billing_period)
     return result
 
 
@@ -64,6 +65,8 @@ def create_payment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid plan. Choose from: {list(PLAN_PRICES.keys())}",
         )
+    if payload.billing_period not in ("monthly", "annual"):
+        raise HTTPException(status_code=400, detail="Billing period must be monthly or annual")
 
     if payload.currency.lower() == "usdt" and payload.chain_id not in ("trx", "trc20"):
         raise HTTPException(status_code=400, detail="USDT payments only support TRC-20 (Tron)")
@@ -90,6 +93,7 @@ def create_payment(
         .filter(
             Payment.user_id == current_user.id,
             Payment.plan == payload.plan,
+            Payment.billing_period == payload.billing_period,
             Payment.currency == currency,
             Payment.status == "pending",
             Payment.created_at >= recent_cutoff,
@@ -101,7 +105,7 @@ def create_payment(
         return _payment_response(existing, receiving_address)
 
     verifier = PaymentVerifier()
-    base_amount = verifier.get_plan_price(payload.plan, payload.currency)
+    base_amount = verifier.get_plan_price(payload.plan, payload.currency, payload.billing_period)
     if base_amount <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -116,6 +120,7 @@ def create_payment(
         tx_hash=None,
         status="pending",
         plan=payload.plan,
+        billing_period=payload.billing_period,
     )
     db.add(payment)
     db.commit()
@@ -138,17 +143,16 @@ def verify_payment(
     Checks transaction status, amount, and recipient address.
     """
     payload.tx_hash = payload.tx_hash.strip().lower()
-    # Find the user's most recent pending payment in the given currency
-    payment = (
-        db.query(Payment)
-        .filter(
-            Payment.user_id == current_user.id,
-            Payment.currency == payload.currency.lower(),
-            Payment.status == "pending",
-        )
-        .order_by(Payment.created_at.desc())
-        .first()
+    # Bind manual verification to the exact checkout intent whenever the
+    # frontend supplies its ID. The fallback keeps older clients compatible.
+    payment_query = db.query(Payment).filter(
+        Payment.user_id == current_user.id,
+        Payment.currency == payload.currency.lower(),
+        Payment.status == "pending",
     )
+    if payload.payment_id is not None:
+        payment_query = payment_query.filter(Payment.id == payload.payment_id)
+    payment = payment_query.order_by(Payment.created_at.desc()).first()
     if not payment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -200,7 +204,7 @@ def verify_payment(
     payment.status = "confirmed"
 
     # Upgrade user's plan
-    current_user.plan = payment.plan
+    activate_user_plan(current_user, payment.plan, payment.billing_period)
 
     db.commit()
     db.refresh(payment)
@@ -251,6 +255,7 @@ def payment_status(
         "currency": payment.currency,
         "amount": payment.amount,
         "plan": payment.plan,
+        "billing_period": payment.billing_period,
         "tx_hash": payment.tx_hash,
         "created_at": payment.created_at.isoformat() if payment.created_at else None,
         "auto_verify": True,

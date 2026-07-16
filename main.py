@@ -7,10 +7,11 @@ Crypto Quantitative Trading Platform backend.
 import logging
 import time
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, status
+from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
-from database import Base, engine
+from database import Base, engine, ensure_compat_schema
 from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai, admin, analytics, dex as dex_router
 
 # ---------------------------------------------------------------------------
@@ -42,7 +43,18 @@ async def log_critical_flows(request: Request, call_next):
     """Emit concise, secret-free runtime logs for auth and payment support."""
     started = time.perf_counter()
     path = request.url.path
-    should_log = path.startswith(("/api/auth/", "/api/payments/", "/api/analytics/"))
+    should_log = path.startswith((
+        "/api/auth/",
+        "/api/payments/",
+        "/api/analytics/",
+        "/api/ai/",
+        "/api/backtest",
+        "/api/strategies",
+        "/api/subscriptions",
+        "/api/bots",
+        "/api/referrals/",
+        "/api/dex/exchange",
+    ))
     try:
         response = await call_next(request)
     except Exception:
@@ -60,11 +72,19 @@ async def log_critical_flows(request: Request, call_next):
         )
     return response
 
-# CORS — allow all origins for development
+# CORS — production site, Cloudflare previews, and local development only.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[
+        "https://aiquantbtc.com",
+        "https://www.aiquantbtc.com",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_origin_regex=r"(?:https://[a-z0-9-]+\.aiquantbtc\.pages\.dev|http://(?:localhost|127\.0\.0\.1)(?::\d+)?)",
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -93,12 +113,10 @@ app.include_router(dex_router.router, prefix="/api")
 @app.on_event("startup")
 def on_startup():
     """Create database tables on startup and launch background tasks."""
-    try:
-        logger.info("Creating database tables...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("QuantEdge API started successfully.")
-    except Exception as e:
-        logger.error(f"Database init error (non-fatal): {e}")
+    logger.info("Creating database tables...")
+    Base.metadata.create_all(bind=engine)
+    ensure_compat_schema()
+    logger.info("QuantEdge API started successfully.")
 
     # Start auto-payment verifier background task (non-fatal if it fails)
     try:
@@ -115,6 +133,15 @@ def on_startup():
 @app.get("/health", tags=["health"])
 def health_check():
     """Health check endpoint."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        logger.error("Database health check failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from exc
     return {"status": "ok", "service": "QuantEdge API", "version": "1.0.0"}
 
 
