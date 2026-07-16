@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 from fastapi import HTTPException
 
 from quant.payment_verifier import PaymentVerifier, TRX_USDT_CONTRACT
+from quant.auto_verifier import _amounts_match
 from routers.dex import SignedExchangeRequest, relay_signed_exchange
 from routers.analytics import _hash_identifier, _origin_allowed, _safe_properties
 
@@ -43,6 +44,14 @@ class PaymentVerifierTests(unittest.TestCase):
         get.side_effect = [tx, events]
         result = PaymentVerifier().verify_trc20_payment("b" * 64, 29.0, recipient)
         self.assertFalse(result["verified"])
+
+    def test_auto_match_requires_exact_stablecoin_quote(self):
+        self.assertTrue(_amounts_match(29.000001, 29.000001, "usdt"))
+        self.assertFalse(_amounts_match(29.01, 29.000001, "usdt"))
+
+    def test_auto_match_requires_exact_bitcoin_satoshis(self):
+        self.assertTrue(_amounts_match(0.00081234, 0.00081234, "btc"))
+        self.assertFalse(_amounts_match(0.00081235, 0.00081234, "btc"))
 
 
 class SignedRelayTests(unittest.TestCase):

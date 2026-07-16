@@ -5,8 +5,9 @@ Crypto Quantitative Trading Platform backend.
 """
 
 import logging
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine
@@ -34,6 +35,30 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
 )
+
+
+@app.middleware("http")
+async def log_critical_flows(request: Request, call_next):
+    """Emit concise, secret-free runtime logs for auth and payment support."""
+    started = time.perf_counter()
+    path = request.url.path
+    should_log = path.startswith(("/api/auth/", "/api/payments/", "/api/analytics/"))
+    try:
+        response = await call_next(request)
+    except Exception:
+        if should_log:
+            logger.exception("HTTP %s %s failed", request.method, path)
+        raise
+    if should_log:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.info(
+            "HTTP %s %s -> %d (%.0fms)",
+            request.method,
+            path,
+            response.status_code,
+            elapsed_ms,
+        )
+    return response
 
 # CORS — allow all origins for development
 app.add_middleware(

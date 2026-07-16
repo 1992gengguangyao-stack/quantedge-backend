@@ -107,9 +107,9 @@ def _scan_evm_chain(chain_id: int, receiving_address: str, db: Session) -> int:
                         for payment in pending_payments:
                             if payment.currency != "eth":
                                 continue
-                            if _amounts_match(eth_amount, payment.amount):
-                                _confirm_payment(db, payment, tx_hash)
-                                confirmed_count += 1
+                            if _amounts_match(eth_amount, payment.amount, "eth"):
+                                if _confirm_payment(db, payment, tx_hash):
+                                    confirmed_count += 1
                                 break
 
                         _processed_txs.add(tx_hash)
@@ -169,9 +169,9 @@ def _scan_evm_chain(chain_id: int, receiving_address: str, db: Session) -> int:
                                 for payment in pending_payments:
                                     if payment.currency != currency:
                                         continue
-                                    if _amounts_match(actual_amount, payment.amount):
-                                        _confirm_payment(db, payment, tx_hash)
-                                        confirmed_count += 1
+                                    if _amounts_match(actual_amount, payment.amount, currency):
+                                        if _confirm_payment(db, payment, tx_hash):
+                                            confirmed_count += 1
                                         break
 
                         _processed_txs.add(tx_hash)
@@ -234,9 +234,9 @@ def _scan_btc(receiving_address: str, db: Session) -> int:
                     btc_amount = vout.get("value", 0) / 1e8  # satoshis to BTC
 
                     for payment in pending_payments:
-                        if _amounts_match(btc_amount, payment.amount):
-                            _confirm_payment(db, payment, tx_hash)
-                            confirmed_count += 1
+                        if _amounts_match(btc_amount, payment.amount, "btc"):
+                            if _confirm_payment(db, payment, tx_hash):
+                                confirmed_count += 1
                             break
 
             _processed_txs.add(tx_hash)
@@ -303,9 +303,9 @@ def _scan_tron(receiving_address: str, db: Session) -> int:
 
             # Match against pending USDT payments
             for payment in pending_payments:
-                if _amounts_match(amount, payment.amount):
-                    _confirm_payment(db, payment, tx_hash)
-                    confirmed_count += 1
+                if _amounts_match(amount, payment.amount, "usdt"):
+                    if _confirm_payment(db, payment, tx_hash):
+                        confirmed_count += 1
                     break
 
             _processed_txs.add(tx_hash)
@@ -316,16 +316,27 @@ def _scan_tron(receiving_address: str, db: Session) -> int:
     return confirmed_count
 
 
-def _amounts_match(actual: float, expected: float, tolerance: float = 0.02) -> bool:
-    """Check if two amounts match within a tolerance (default 2%)."""
+def _amounts_match(actual: float, expected: float, currency: str) -> bool:
+    """Match the exact quoted on-chain unit, never a percentage range."""
     if expected <= 0:
         return False
-    diff = abs(actual - expected) / expected
-    return diff <= tolerance
+    tolerance = {
+        "usdt": 0.0000005,
+        "usdc": 0.0000005,
+        "btc": 0.000000005,
+        "eth": 0.000000005,
+    }.get(currency.lower(), 0.000000005)
+    return abs(float(actual) - float(expected)) <= tolerance
 
 
-def _confirm_payment(db: Session, payment: Payment, tx_hash: str) -> None:
+def _confirm_payment(db: Session, payment: Payment, tx_hash: str) -> bool:
     """Mark a payment as confirmed and upgrade the user's plan."""
+    if payment.status != "pending":
+        return False
+    reused = db.query(Payment).filter(Payment.tx_hash == tx_hash, Payment.id != payment.id).first()
+    if reused:
+        logger.warning("Rejected reused payment transaction %s for payment #%d", tx_hash, payment.id)
+        return False
     payment.tx_hash = tx_hash
     payment.status = "confirmed"
 
@@ -344,6 +355,7 @@ def _confirm_payment(db: Session, payment: Payment, tx_hash: str) -> None:
         )
 
     db.commit()
+    return True
 
 
 def run_auto_verify_loop() -> None:

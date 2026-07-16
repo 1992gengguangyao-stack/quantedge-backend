@@ -4,7 +4,7 @@ Uses the real PaymentVerifier with web3.py for Ethereum/BSC/Polygon/Arbitrum
 and Blockstream API for Bitcoin.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -17,6 +17,34 @@ from schemas import MessageResponse, PaymentCreate, PaymentOut, PaymentVerify
 from quant.payment_verifier import PaymentVerifier, PLAN_PRICES, CHAIN_CONFIG
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+
+def _payment_response(payment: Payment, receiving_address: str) -> dict:
+    result = PaymentOut.model_validate(payment).model_dump(mode="json")
+    result["receiving_address"] = receiving_address
+    result["usd_price"] = PLAN_PRICES.get(payment.plan, 0)
+    return result
+
+
+def _allocate_unique_amount(db: Session, currency: str, base_amount: float) -> float:
+    """Give simultaneous payments distinct exact amounts for safe auto-matching."""
+    precision = {"usdt": 6, "usdc": 6, "btc": 8, "eth": 8}.get(currency, 8)
+    step = 10 ** -precision
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    used = {
+        round(float(value), precision)
+        for (value,) in db.query(Payment.amount).filter(
+            Payment.currency == currency,
+            Payment.status == "pending",
+            Payment.created_at >= cutoff,
+        ).all()
+    }
+    rounded_base = round(float(base_amount), precision)
+    for offset in range(1, 1000):
+        candidate = round(rounded_base + offset * step, precision)
+        if candidate not in used:
+            return candidate
+    raise HTTPException(status_code=503, detail="Payment quote capacity is temporarily full")
 
 
 @router.post("/create")
@@ -37,15 +65,6 @@ def create_payment(
             detail=f"Invalid plan. Choose from: {list(PLAN_PRICES.keys())}",
         )
 
-    verifier = PaymentVerifier()
-    crypto_amount = verifier.get_plan_price(payload.plan, payload.currency)
-
-    if crypto_amount <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to get price for the specified currency",
-        )
-
     if payload.currency.lower() == "usdt" and payload.chain_id not in ("trx", "trc20"):
         raise HTTPException(status_code=400, detail="USDT payments only support TRC-20 (Tron)")
 
@@ -63,6 +82,33 @@ def create_payment(
     if not receiving_address:
         raise HTTPException(status_code=503, detail="Payment receiving address is not configured")
 
+    # Retrying the same checkout must not create a stack of indistinguishable
+    # pending orders. Reuse a recent intent for this user and quote.
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    existing = (
+        db.query(Payment)
+        .filter(
+            Payment.user_id == current_user.id,
+            Payment.plan == payload.plan,
+            Payment.currency == currency,
+            Payment.status == "pending",
+            Payment.created_at >= recent_cutoff,
+        )
+        .order_by(Payment.created_at.desc())
+        .first()
+    )
+    if existing:
+        return _payment_response(existing, receiving_address)
+
+    verifier = PaymentVerifier()
+    base_amount = verifier.get_plan_price(payload.plan, payload.currency)
+    if base_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to get price for the specified currency",
+        )
+    crypto_amount = _allocate_unique_amount(db, currency, base_amount)
+
     payment = Payment(
         user_id=current_user.id,
         amount=crypto_amount,
@@ -76,11 +122,7 @@ def create_payment(
     db.refresh(payment)
 
     # Return payment with receiving address info (not stored in DB, just for API response)
-    payment_dict = PaymentOut.model_validate(payment).model_dump(mode="json")
-    payment_dict["receiving_address"] = receiving_address
-    payment_dict["usd_price"] = PLAN_PRICES.get(payload.plan, 0)
-
-    return payment_dict
+    return _payment_response(payment, receiving_address)
 
 
 @router.post("/verify", response_model=PaymentOut)

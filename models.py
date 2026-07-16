@@ -51,6 +51,17 @@ class User(Base):
     referrals_made = relationship("Referral", back_populates="referrer", foreign_keys="Referral.referrer_id", cascade="all, delete-orphan")
 
 
+class SiweNonce(Base):
+    """Short-lived, one-time challenge used by wallet sign-in."""
+
+    __tablename__ = "siwe_nonces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nonce = Column(String(128), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Strategy(Base):
     __tablename__ = "strategies"
 

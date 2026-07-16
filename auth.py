@@ -65,7 +65,7 @@ def verify_token(token: str) -> dict:
 # SIWE (Sign-In with Ethereum) — EIP-4361
 # ---------------------------------------------------------------------------
 
-def _parse_siwe_message(message: str) -> dict:
+def parse_siwe_message(message: str) -> dict:
     """
     Parse an EIP-4361 Sign-In with Ethereum message into a dict of fields.
 
@@ -123,10 +123,10 @@ def verify_siwe_message(message: str, signature: str) -> str:
     :raises ValueError: if verification fails
     """
     # Parse the SIWE message fields
-    fields = _parse_siwe_message(message)
+    fields = parse_siwe_message(message)
 
     # Validate required fields
-    required = ["address", "nonce", "issued_at"]
+    required = ["address", "nonce", "issued_at", "uri", "version", "chain_id"]
     for req in required:
         if req not in fields or not fields[req]:
             raise ValueError(f"SIWE message missing required field: {req}")
@@ -142,6 +142,23 @@ def verify_siwe_message(message: str, signature: str) -> str:
             if "expired" in str(exc).lower():
                 raise
             # If we can't parse the date, skip expiration check (lenient)
+
+    if fields.get("version") != "1":
+        raise ValueError("Unsupported SIWE version")
+
+    try:
+        issued_at = datetime.fromisoformat(fields["issued_at"].replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        if issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=timezone.utc)
+        if issued_at > now + timedelta(minutes=2):
+            raise ValueError("SIWE issued-at time is in the future")
+        if issued_at < now - timedelta(minutes=15):
+            raise ValueError("SIWE message is too old")
+    except ValueError as exc:
+        if "SIWE" in str(exc):
+            raise
+        raise ValueError("Invalid SIWE issued-at time") from exc
 
     # Recover the address from the signature
     msg_encode = encode_defunct(text=message)

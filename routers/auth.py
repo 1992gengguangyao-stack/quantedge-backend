@@ -3,7 +3,9 @@ Auth router: wallet-only login (SIWE) and current user info.
 """
 
 import secrets
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,11 +13,12 @@ from sqlalchemy.orm import Session
 from auth import (
     create_access_token,
     generate_nonce,
+    parse_siwe_message,
     verify_siwe_message,
 )
 from database import get_db
 from deps import get_current_user
-from models import User, Referral
+from models import User, Referral, SiweNonce
 from schemas import (
     Token,
     UserOut,
@@ -24,6 +27,18 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _allowed_siwe_domain(domain: str) -> bool:
+    if domain in {"aiquantbtc.com", "www.aiquantbtc.com"}:
+        return True
+    if re.fullmatch(r"[a-z0-9-]+\.aiquantbtc\.pages\.dev", domain or ""):
+        return True
+    return bool(re.fullmatch(r"(?:localhost|127\.0\.0\.1)(?::\d+)?", domain or ""))
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _generate_invite_code(db: Session) -> str:
@@ -45,8 +60,30 @@ def wallet_login(payload: WalletLogin, db: Session = Depends(get_db)):
     signature, verifies it matches the message, and finds-or-creates the user.
     """
     try:
+        fields = parse_siwe_message(payload.message)
+        domain = fields.get("domain", "")
+        uri = urlparse(fields.get("uri", ""))
+        if not _allowed_siwe_domain(domain):
+            raise ValueError("SIWE domain is not allowed")
+        if uri.netloc != domain or uri.scheme not in {"https", "http"}:
+            raise ValueError("SIWE URI does not match its domain")
+
+        nonce_record = (
+            db.query(SiweNonce)
+            .filter(SiweNonce.nonce == fields.get("nonce", ""))
+            .with_for_update()
+            .first()
+        )
+        if not nonce_record or nonce_record.used_at is not None:
+            raise ValueError("SIWE nonce is invalid or has already been used")
+        if _aware(nonce_record.created_at) < datetime.now(timezone.utc) - timedelta(minutes=15):
+            raise ValueError("SIWE nonce has expired")
+
         wallet_address = verify_siwe_message(payload.message, payload.signature)
+        nonce_record.used_at = datetime.now(timezone.utc)
+        db.commit()
     except ValueError as exc:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"SIWE verification failed: {exc}",
@@ -113,7 +150,11 @@ def me(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/nonce", response_model=MessageResponse)
-def get_nonce():
+def get_nonce(db: Session = Depends(get_db)):
     """Generate a random nonce for SIWE message construction."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    db.query(SiweNonce).filter(SiweNonce.created_at < cutoff).delete(synchronize_session=False)
     nonce = generate_nonce()
+    db.add(SiweNonce(nonce=nonce))
+    db.commit()
     return MessageResponse(message="nonce", detail={"nonce": nonce})
