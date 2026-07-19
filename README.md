@@ -2,10 +2,10 @@
 
 BTCquant is a wallet-first Bitcoin quantitative research workspace for building strategies, running fee-aware OHLCV backtests, and preparing Hyperliquid testnet orders with local wallet signing.
 
-- Product: [aiquantbtc.com](https://aiquantbtc.com/)
-- Pricing: [aiquantbtc.com/pricing](https://aiquantbtc.com/pricing)
-- Founding 9 annual passes: [aiquantbtc.com/founding-nine](https://aiquantbtc.com/founding-nine)
-- BTC quant research guide: [aiquantbtc.com/bitcoin-quant-strategies](https://aiquantbtc.com/bitcoin-quant-strategies)
+- Product: [aiquantbtc.com](https://aiquantbtc.com/?utm_source=github&utm_medium=repository&utm_campaign=founding9)
+- Pricing: [aiquantbtc.com/pricing](https://aiquantbtc.com/pricing?utm_source=github&utm_medium=repository&utm_campaign=founding9)
+- Founding 9 annual passes: [aiquantbtc.com/founding-nine](https://aiquantbtc.com/founding-nine?utm_source=github&utm_medium=repository&utm_campaign=founding9)
+- BTC quant research guide: [aiquantbtc.com/bitcoin-quant-strategies](https://aiquantbtc.com/bitcoin-quant-strategies?utm_source=github&utm_medium=repository&utm_campaign=founding9)
 
 ## Current product scope
 
