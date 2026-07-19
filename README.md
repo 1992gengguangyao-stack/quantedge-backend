@@ -9,6 +9,8 @@ BTCquant is a wallet-first Bitcoin quantitative research workspace for building 
 - Free fee and slippage calculator: [aiquantbtc.com/crypto-backtest-fee-calculator](https://aiquantbtc.com/crypto-backtest-fee-calculator?utm_source=github&utm_medium=repository&utm_campaign=research_tools)
 - Hyperliquid L1 signing guide: [aiquantbtc.com/hyperliquid-l1-signing](https://aiquantbtc.com/hyperliquid-l1-signing?utm_source=github&utm_medium=repository&utm_campaign=hyperliquid_l1)
 
+Start with the [15-minute research preview walkthrough](docs/RESEARCH_PREVIEW.md), then [open a GitHub discussion](https://github.com/1992gengguangyao-stack/quantedge-backend/discussions/new?category=general) if any part of the workflow is unclear.
+
 ## Current product scope
 
 - Wallet-only SIWE authentication, including WalletConnect-compatible mobile wallets
