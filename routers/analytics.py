@@ -31,6 +31,7 @@ ALLOWED_EVENTS = {
     "payment_submitted",
     "payment_confirmed",
     "guide_cta",
+    "launch_view",
     "language_change",
 }
 

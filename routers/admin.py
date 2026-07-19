@@ -134,6 +134,7 @@ def admin_analytics(
         "top_sources": [{"source": source, "views": count} for source, count in source_counts.most_common(10)],
         "funnel": {
             "visitors": visitors,
+            "launch_view": event_counts.get("launch_view", 0),
             "wallet_connect_open": event_counts.get("wallet_connect_open", 0),
             "wallet_connect_success": event_counts.get("wallet_connect_success", 0),
             "checkout_start": event_counts.get("checkout_start", 0),

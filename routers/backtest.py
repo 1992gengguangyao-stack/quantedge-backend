@@ -3,13 +3,14 @@ Backtest router: submit backtest jobs and retrieve results.
 Uses the real BacktestEngine with ccxt historical data.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import get_current_user
+from billing import get_plan_limits
 from models import Backtest, Strategy, User
 from schemas import BacktestCreate, BacktestOut
 from quant.backtest_engine import BacktestEngine
@@ -41,6 +42,20 @@ def submit_backtest(
     Fetches real historical data via ccxt, executes the user's strategy code,
     simulates trades with commission and slippage, and calculates performance metrics.
     """
+    daily_limit = get_plan_limits(current_user.plan)["backtests_per_day"]
+    now = datetime.now(timezone.utc)
+    day_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+    used_today = db.query(Backtest).filter(
+        Backtest.user_id == current_user.id,
+        Backtest.created_at >= day_start,
+        Backtest.created_at < day_start + timedelta(days=1),
+    ).count()
+    if used_today >= daily_limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Your {current_user.plan} plan allows {daily_limit} backtests per UTC day.",
+        )
+
     # Get strategy code
     strategy_code = ""
     if payload.strategy_id:

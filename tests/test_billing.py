@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from billing import activate_user_plan, expire_user_plan_if_needed, get_plan_usd_price
+from billing import activate_user_plan, expire_user_plan_if_needed, get_plan_limits, get_plan_usd_price
 
 
 class BillingTests(unittest.TestCase):
@@ -31,6 +31,21 @@ class BillingTests(unittest.TestCase):
         self.assertTrue(expire_user_plan_if_needed(user, now))
         self.assertEqual(user.plan, "free")
         self.assertIsNone(user.plan_expires_at)
+
+    def test_each_paid_plan_increases_enforced_workspace_limits(self):
+        free = get_plan_limits("free")
+        starter = get_plan_limits("starter")
+        pro = get_plan_limits("pro")
+        expert = get_plan_limits("expert")
+        for key in free:
+            self.assertLess(free[key], starter[key])
+            self.assertLess(starter[key], pro[key])
+            self.assertLess(pro[key], expert[key])
+
+    def test_unknown_plan_falls_back_to_free_copy(self):
+        limits = get_plan_limits("unknown")
+        limits["saved_strategies"] = 999
+        self.assertEqual(get_plan_limits("free")["saved_strategies"], 3)
 
 
 if __name__ == "__main__":

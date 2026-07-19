@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import get_current_user
+from billing import get_plan_limits
 from models import Strategy, User
 from schemas import (
     MessageResponse,
@@ -43,6 +44,13 @@ def create_strategy(
     db: Session = Depends(get_db),
 ):
     """Create a new strategy."""
+    limit = get_plan_limits(current_user.plan)["saved_strategies"]
+    current_count = db.query(Strategy).filter(Strategy.user_id == current_user.id).count()
+    if current_count >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your {current_user.plan} plan allows {limit} saved strategies. Upgrade or delete one to continue.",
+        )
     strategy = Strategy(
         user_id=current_user.id,
         name=payload.name,

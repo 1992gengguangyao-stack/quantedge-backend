@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import get_current_user
+from billing import get_plan_limits
 from models import Bot, Strategy, User
 from schemas import BotCreate, BotOut, BotUpdate, MessageResponse
 from quant.exchange_trader import ExchangeTrader
@@ -39,6 +40,13 @@ def create_bot(
     db: Session = Depends(get_db),
 ):
     """Create a new trading bot."""
+    limit = get_plan_limits(current_user.plan)["bot_configs"]
+    current_count = db.query(Bot).filter(Bot.user_id == current_user.id).count()
+    if current_count >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your {current_user.plan} plan allows {limit} bot configurations. Upgrade or delete one to continue.",
+        )
     if payload.strategy_id:
         strategy = db.query(Strategy).filter(Strategy.id == payload.strategy_id).first()
         if not strategy:

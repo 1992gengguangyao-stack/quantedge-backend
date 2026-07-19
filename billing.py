@@ -9,6 +9,32 @@ BILLING_DAYS = {"monthly": 30, "annual": 365}
 PLAN_PRICES = {"starter": 29.0, "pro": 79.0, "expert": 199.0}
 ANNUAL_DISCOUNT = 0.20
 
+# These limits are the paid product. Keep the pricing page and API enforcement
+# in sync so customers receive a concrete upgrade instead of a cosmetic plan
+# label. Execution remains testnet/paper-first; no return is promised.
+PLAN_LIMITS = {
+    "free": {
+        "saved_strategies": 3,
+        "backtests_per_day": 3,
+        "bot_configs": 1,
+    },
+    "starter": {
+        "saved_strategies": 15,
+        "backtests_per_day": 25,
+        "bot_configs": 10,
+    },
+    "pro": {
+        "saved_strategies": 100,
+        "backtests_per_day": 200,
+        "bot_configs": 50,
+    },
+    "expert": {
+        "saved_strategies": 500,
+        "backtests_per_day": 1000,
+        "bot_configs": 200,
+    },
+}
+
 
 def get_plan_usd_price(plan: str, billing_period: str = "monthly") -> float:
     """Return the exact checkout total for a monthly or annual access period."""
@@ -18,6 +44,11 @@ def get_plan_usd_price(plan: str, billing_period: str = "monthly") -> float:
     if billing_period == "annual":
         return round(monthly * 12 * (1 - ANNUAL_DISCOUNT), 2)
     return monthly
+
+
+def get_plan_limits(plan: str) -> dict[str, int]:
+    """Return a copy of the enforced workspace limits for a plan."""
+    return dict(PLAN_LIMITS.get((plan or "free").lower(), PLAN_LIMITS["free"]))
 
 
 def _as_utc(value: datetime | None) -> datetime | None:

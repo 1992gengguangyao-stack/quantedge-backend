@@ -9,10 +9,17 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import get_current_user
+from billing import get_plan_limits
 from models import Strategy, Subscription, User
 from schemas import MessageResponse, SubscriptionCreate, SubscriptionOut
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
+
+
+@router.get("/plan-limits")
+def plan_limits(current_user: User = Depends(get_current_user)):
+    """Return the limits that are currently enforced for the signed-in user."""
+    return {"plan": current_user.plan, "limits": get_plan_limits(current_user.plan)}
 
 
 @router.get("/", response_model=list[SubscriptionOut])
