@@ -9,7 +9,7 @@ from quant.payment_verifier import PaymentVerifier, TRX_USDT_CONTRACT
 from quant.auto_verifier import _amounts_match, _confirm_payment
 from routers.auth import _allowed_siwe_domain, _siwe_uri_matches
 from routers.dex import SignedExchangeRequest, relay_signed_exchange
-from routers.analytics import _hash_identifier, _origin_allowed, _safe_properties
+from routers.analytics import ALLOWED_EVENTS, _hash_identifier, _origin_allowed, _safe_properties
 from routers.payments import _allocate_unique_amount
 
 
@@ -114,6 +114,13 @@ class SignedRelayTests(unittest.TestCase):
 
 
 class AnalyticsPrivacyTests(unittest.TestCase):
+    def test_public_product_events_are_accepted(self):
+        self.assertTrue({
+            "calculator_view",
+            "calculator_run",
+            "signing_guide_view",
+        }.issubset(ALLOWED_EVENTS))
+
     def test_identifiers_are_hashed_before_storage(self):
         raw = "visitor-12345678"
         digest = _hash_identifier(raw)

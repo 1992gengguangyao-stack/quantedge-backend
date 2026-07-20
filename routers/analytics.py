@@ -32,6 +32,9 @@ ALLOWED_EVENTS = {
     "payment_confirmed",
     "guide_cta",
     "launch_view",
+    "calculator_view",
+    "calculator_run",
+    "signing_guide_view",
     "language_change",
 }
 
