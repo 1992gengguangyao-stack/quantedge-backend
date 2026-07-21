@@ -8,6 +8,8 @@ import logging
 import time
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -90,6 +92,35 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
+# Performance & Security Middleware (auto-fix: cache + gzip + security)
+# ---------------------------------------------------------------------------
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.middleware("http")
+async def add_security_and_cache_headers(request: Request, call_next):
+    """Add security headers and Cache-Control to all responses."""
+    response = await call_next(request)
+    # Security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Cache-Control headers
+    if request.method == "GET" and response.status_code == 200:
+        path = request.url.path
+        if path.startswith(("/api/docs", "/api/redoc", "/api/openapi.json")):
+            response.headers["Cache-Control"] = "public, max-age=3600"
+        elif path in ("/health", "/"):
+            response.headers["Cache-Control"] = "no-cache"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------------
 
@@ -124,6 +155,19 @@ def on_startup():
         start_auto_verifier()
     except Exception as e:
         logger.error(f"Auto-verifier start error (non-fatal): {e}")
+
+
+# ---------------------------------------------------------------------------
+# Error handlers (auto-fix: reduce 404 response size)
+# ---------------------------------------------------------------------------
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: HTTPException):
+    """Return compact JSON 404 instead of default HTML to reduce bandwidth."""
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Not Found", "path": request.url.path}
+    )
 
 
 # ---------------------------------------------------------------------------
