@@ -108,15 +108,19 @@ async def add_security_and_cache_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    # Cache-Control headers
+    # Cache-Control headers (s-maxage for Cloudflare CDN, stale-while-revalidate for hit rate)
+    path = request.url.path
     if request.method == "GET" and response.status_code == 200:
-        path = request.url.path
         if path.startswith(("/api/docs", "/api/redoc", "/api/openapi.json")):
-            response.headers["Cache-Control"] = "public, max-age=3600"
+            response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=600"
         elif path in ("/health", "/"):
             response.headers["Cache-Control"] = "no-cache"
+        elif path.startswith("/api/"):
+            response.headers["Cache-Control"] = "public, max-age=30, s-maxage=300, stale-while-revalidate=60"
         else:
-            response.headers["Cache-Control"] = "public, max-age=300"
+            response.headers["Cache-Control"] = "public, max-age=300, s-maxage=3600, stale-while-revalidate=300"
+    elif response.status_code == 404:
+        response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
     return response
 
 
