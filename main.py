@@ -14,7 +14,7 @@ from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine, ensure_compat_schema
-from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai, admin, analytics, dex as dex_router, monitor
+from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai, admin, analytics, dex as dex_router, monitor, news
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -141,6 +141,7 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(dex_router.router, prefix="/api")
 app.include_router(monitor.router, prefix="/api")
+app.include_router(news.router, prefix="/api")
 
 # ---------------------------------------------------------------------------
 # Startup
