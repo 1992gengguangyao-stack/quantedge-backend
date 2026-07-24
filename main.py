@@ -5,7 +5,9 @@ Crypto Quantitative Trading Platform backend.
 """
 
 import logging
+import shutil
 import time
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
@@ -14,7 +16,7 @@ from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Base, engine, ensure_compat_schema
-from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai, admin, analytics, dex as dex_router, monitor, news
+from routers import auth, strategies, subscriptions, payments, bots, backtest, market, referrals, ai, admin, analytics, dex as dex_router, monitor, news, voice
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -142,14 +144,40 @@ app.include_router(analytics.router, prefix="/api")
 app.include_router(dex_router.router, prefix="/api")
 app.include_router(monitor.router, prefix="/api")
 app.include_router(news.router, prefix="/api")
+app.include_router(voice.router, prefix="/api")
 
 # ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
 
+def _ensure_db_directory():
+    """Ensure the SQLite database directory exists and migrate from old location.
+
+    When a Railway volume is mounted at /data, DATABASE_URL points to
+    /data/quantedge.db. On first deploy with the volume, the old database
+    at /app/quantedge.db (if any) is copied to preserve existing data.
+    """
+    from config import settings
+    if not settings.DATABASE_URL.startswith("sqlite"):
+        return
+    db_path_str = settings.DATABASE_URL.replace("sqlite:///", "", 1)
+    db_path = Path(db_path_str)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Database path: %s", db_path)
+
+    old_db = Path("/app/quantedge.db")
+    if not db_path.exists() and old_db.exists() and str(db_path) != str(old_db):
+        try:
+            shutil.copy2(str(old_db), str(db_path))
+            logger.info("Migrated SQLite DB from %s to %s", old_db, db_path)
+        except Exception as exc:
+            logger.error("DB migration failed: %s", exc)
+
+
 @app.on_event("startup")
 def on_startup():
     """Create database tables on startup and launch background tasks."""
+    _ensure_db_directory()
     logger.info("Creating database tables...")
     Base.metadata.create_all(bind=engine)
     ensure_compat_schema()

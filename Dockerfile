@@ -25,6 +25,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Cache bust: v3-hyperliquid-dex
 COPY . .
 
+# Create persistent data directory for SQLite database (Railway volume mount point)
+RUN mkdir -p /data
+ENV DATABASE_URL=sqlite:////data/quantedge.db
+
 # Expose port
 EXPOSE 8000
 
